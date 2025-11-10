@@ -23,6 +23,7 @@ def generate_cities(n, seed=None):
 def compute_distance_matrix(coords):
     """
     Calcule la matrice des distances euclidiennes entre toutes les villes.
+    Optimisé avec NumPy vectorisé (broadcasting).
 
     Args:
         coords (np.ndarray): Tableau de forme (n, 2) avec les coordonnées des villes
@@ -30,16 +31,9 @@ def compute_distance_matrix(coords):
     Returns:
         np.ndarray: Matrice (n, n) où dist[i, j] = distance euclidienne entre ville i et j
     """
-    n = len(coords)
-    dist = np.zeros((n, n))
-
-    for i in range(n):
-        for j in range(n):
-            if i != j:
-                dx = coords[j, 0] - coords[i, 0]
-                dy = coords[j, 1] - coords[i, 1]
-                dist[i, j] = np.sqrt(dx**2 + dy**2)
-
+    # Utiliser le broadcasting NumPy pour vectoriser le calcul
+    diff = coords[:, np.newaxis, :] - coords[np.newaxis, :, :]
+    dist = np.sqrt(np.sum(diff**2, axis=2))
     return dist
 
 

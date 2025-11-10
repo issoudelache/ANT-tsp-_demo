@@ -53,37 +53,28 @@ class ANT:
     def _compute_distance_matrix(self):
         """
         Calcule la matrice des distances euclidiennes entre toutes les villes.
+        Optimisé avec NumPy vectorisé (broadcasting).
 
         Returns:
             np.ndarray: Matrice (n, n) des distances
         """
-        n = self.n
-        dist = np.zeros((n, n))
-
-        for i in range(n):
-            for j in range(n):
-                if i != j:
-                    dx = self.coords[j, 0] - self.coords[i, 0]
-                    dy = self.coords[j, 1] - self.coords[i, 1]
-                    dist[i, j] = np.sqrt(dx**2 + dy**2)
-
+        # Utiliser le broadcasting NumPy pour vectoriser le calcul
+        diff = self.coords[:, np.newaxis, :] - self.coords[np.newaxis, :, :]
+        dist = np.sqrt(np.sum(diff**2, axis=2))
         return dist
 
     def _compute_visibility(self):
         """
         Calcule la matrice de visibilité (inverse de la distance).
         eta[i,j] = 1 / dist[i,j] si i != j, sinon 0.
+        Optimisé avec NumPy vectorisé.
 
         Returns:
             np.ndarray: Matrice (n, n) de visibilité
         """
-        eta = np.zeros((self.n, self.n))
-
-        for i in range(self.n):
-            for j in range(self.n):
-                if i != j and self.dist[i, j] > 0:
-                    eta[i, j] = 1.0 / self.dist[i, j]
-
+        # Éviter la division par zéro avec np.divide et où
+        with np.errstate(divide='ignore', invalid='ignore'):
+            eta = np.divide(1.0, self.dist, where=self.dist > 0, out=np.zeros_like(self.dist))
         return eta
 
     def _initialize_pheromones(self):

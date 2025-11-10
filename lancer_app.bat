@@ -1,11 +1,17 @@
 @echo off
-echo ========================================
+cd /d "%~dp0"
+echo ============================================
 echo Application ACO - Colonies de Fourmis
-echo ========================================
+echo ============================================
+
+echo.
+echo Activation de l'environnement virtuel...
+call .venv\Scripts\activate
+
 echo.
 echo Lancement de l'interface graphique...
+python -m streamlit run app_streamlit.py
+
 echo.
-cd /d "%~dp0"
-streamlit run app_streamlit.py
 pause
 

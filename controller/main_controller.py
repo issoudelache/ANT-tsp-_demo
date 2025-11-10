@@ -17,7 +17,7 @@ class MainController:
     Contrôleur principal qui coordonne le modèle et la vue.
     """
 
-    def __init__(self, n_cities=10, seed=42, n_cycles=10):
+    def __init__(self, n_cities=20, seed=42, n_cycles=1000):
         """
         Initialise le contrôleur.
 
@@ -64,15 +64,23 @@ class MainController:
         self.view.display_section_header(f"Exécution de {self.n_cycles} cycles ACO")
 
         with time_block(f"Exécution des {self.n_cycles} cycles"):
+            # Intervalle d'affichage de progression (tous les 10% des cycles ou minimum 100)
+            progress_interval = max(self.n_cycles // 10, 100)
+
             for cycle_idx in range(1, self.n_cycles + 1):
                 # Exécuter un cycle
-                with time_block(f"  Cycle {cycle_idx}"):
-                    stats_cycle = self.engine.run_cycle()
+                stats_cycle = self.engine.run_cycle()
 
                 # Sauvegarder dans l'historique
                 self.history.append(stats_cycle)
 
-                # Afficher les statistiques du cycle
+                # Afficher la progression périodiquement
+                if cycle_idx % progress_interval == 0 or cycle_idx == self.n_cycles:
+                    best_global = self.engine.best_len_global
+                    self.view.display_message(
+                        f"  Cycle {cycle_idx}/{self.n_cycles} - "
+                        f"Meilleure longueur globale: {best_global:.2f}"
+                    )
 
         # Afficher un résumé de la convergence
         with time_block("Affichage du résumé de convergence"):
@@ -83,7 +91,7 @@ def main():
     """
     Point d'entrée principal de l'application.
     """
-    controller = MainController(n_cities=15, seed=43, n_cycles=999)
+    controller = MainController(n_cities=100, seed=43, n_cycles=1000)
     controller.run()
 
 

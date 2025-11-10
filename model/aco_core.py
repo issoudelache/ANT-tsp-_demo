@@ -1,5 +1,6 @@
 """
 Module pour le moteur ACO (Ant Colony Optimization) avec cycles complets.
+Optimisé avec NumPy vectorisé pour des performances maximales.
 """
 import numpy as np
 import time
@@ -59,37 +60,32 @@ class ACOEngine:
     def _compute_distance_matrix(self):
         """
         Calcule la matrice des distances euclidiennes entre toutes les villes.
+        Optimisé avec NumPy vectorisé (broadcasting).
 
         Returns:
             np.ndarray: Matrice (n, n) des distances
         """
-        n = self.n
-        dist = np.zeros((n, n))
-
-        for i in range(n):
-            for j in range(n):
-                if i != j:
-                    dx = self.coords[j, 0] - self.coords[i, 0]
-                    dy = self.coords[j, 1] - self.coords[i, 1]
-                    dist[i, j] = np.sqrt(dx**2 + dy**2)
-
+        # Utiliser le broadcasting NumPy pour vectoriser le calcul
+        # coords[:, np.newaxis] crée une forme (n, 1, 2)
+        # coords[np.newaxis, :] crée une forme (1, n, 2)
+        # La différence donne une forme (n, n, 2)
+        diff = self.coords[:, np.newaxis, :] - self.coords[np.newaxis, :, :]
+        # Calculer les distances euclidiennes
+        dist = np.sqrt(np.sum(diff**2, axis=2))
         return dist
 
     def _compute_visibility(self):
         """
         Calcule la matrice de visibilité (inverse de la distance).
         eta[i,j] = 1 / dist[i,j] si i != j, sinon 0.
+        Optimisé avec NumPy vectorisé.
 
         Returns:
             np.ndarray: Matrice (n, n) de visibilité
         """
-        eta = np.zeros((self.n, self.n))
-
-        for i in range(self.n):
-            for j in range(self.n):
-                if i != j and self.dist[i, j] > 0:
-                    eta[i, j] = 1.0 / self.dist[i, j]
-
+        # Éviter la division par zéro avec np.divide et où
+        with np.errstate(divide='ignore', invalid='ignore'):
+            eta = np.divide(1.0, self.dist, where=self.dist > 0, out=np.zeros_like(self.dist))
         return eta
 
     def _initialize_pheromones(self):
@@ -104,71 +100,67 @@ class ACOEngine:
 
         return tau
 
-    def _build_probabilistic_tour(self, start_city):
+    def _build_probabilistic_tour(self, start_city, tau_alpha=None, eta_beta=None):
         """
         Construit un tour probabiliste guidé par tau^alpha * eta^beta.
-
-        Utilise une liste tabou pour éviter de revisiter les villes, et une sélection
-        par roulette (cumsum + random) pour choisir la prochaine ville selon les scores.
+        Optimisé avec des tableaux NumPy et des masques booléens.
 
         Args:
             start_city (int): Indice de la ville de départ
+            tau_alpha (np.ndarray, optional): Matrice tau^alpha précalculée
+            eta_beta (np.ndarray, optional): Matrice eta^beta précalculée
 
         Returns:
-            list: Tour complet sous forme de liste d'indices [start, ..., start]
+            np.ndarray: Tour complet sous forme de tableau d'indices [start, ..., start]
         """
-        # Initialiser le tour avec la ville de départ
-        tour = [start_city]
+        # Utiliser un tableau NumPy pour le tour
+        tour = np.empty(self.n + 1, dtype=np.int32)
+        tour[0] = start_city
 
-        # Liste tabou : villes déjà visitées
-        visited = {start_city}
+        # Masque booléen pour les villes visitées (plus rapide qu'un set)
+        visited = np.zeros(self.n, dtype=bool)
+        visited[start_city] = True
 
-        # Position actuelle
+        # Précalculer tau^alpha et eta^beta si non fournis
+        if tau_alpha is None:
+            tau_alpha = self.tau ** self.alpha
+        if eta_beta is None:
+            eta_beta = self.eta ** self.beta
+
         current_city = start_city
 
         # Construire le tour ville par ville
-        while len(tour) < self.n:
-            # Liste des villes non visitées
-            unvisited = [city for city in range(self.n) if city not in visited]
+        for step in range(1, self.n):
+            # Calculer les scores pour toutes les villes non visitées
+            scores = tau_alpha[current_city] * eta_beta[current_city]
 
-            if not unvisited:
-                break
+            # Masquer les villes déjà visitées
+            scores[visited] = 0
 
-            # Calculer les scores w_ij = tau[i,j]^alpha * eta[i,j]^beta
-            scores = np.zeros(len(unvisited))
-            for idx, city in enumerate(unvisited):
-                tau_value = self.tau[current_city, city]
-                eta_value = self.eta[current_city, city]
-                scores[idx] = (tau_value ** self.alpha) * (eta_value ** self.beta)
-
-            # Normaliser les scores pour obtenir des probabilités
+            # Normaliser les scores
             total_score = scores.sum()
 
-            if total_score == 0:
-                # Si tous les scores sont nuls, choisir uniformément
-                probabilities = np.ones(len(unvisited)) / len(unvisited)
-            else:
+            if total_score > 0:
                 probabilities = scores / total_score
+                # Sélection par roulette avec searchsorted
+                cumulative_probs = np.cumsum(probabilities)
+                random_value = self.rng.random()
+                next_city = np.searchsorted(cumulative_probs, random_value)
 
-            # Sélection par roulette : cumsum + random
-            cumulative_probs = np.cumsum(probabilities)
-            random_value = self.rng.random()
+                # Correction pour le cas limite
+                if next_city >= self.n:
+                    next_city = self.n - 1
+            else:
+                # Choisir uniformément parmi les villes non visitées
+                unvisited_indices = np.where(~visited)[0]
+                next_city = self.rng.choice(unvisited_indices)
 
-            # Trouver l'index de la ville sélectionnée
-            selected_idx = np.searchsorted(cumulative_probs, random_value)
-
-            # S'assurer que l'index est valide (cas limite où random_value = 1.0)
-            if selected_idx >= len(unvisited):
-                selected_idx = len(unvisited) - 1
-
-            # Ajouter la ville sélectionnée au tour
-            next_city = unvisited[selected_idx]
-            tour.append(next_city)
-            visited.add(next_city)
+            tour[step] = next_city
+            visited[next_city] = True
             current_city = next_city
 
-        # Fermer le tour en revenant à la ville de départ
-        tour.append(start_city)
+        # Fermer le tour
+        tour[self.n] = start_city
 
         return tour
 
@@ -177,7 +169,7 @@ class ACOEngine:
         Calcule la longueur totale d'un tour donné.
 
         Args:
-            tour (list): Liste d'indices représentant le tour (doit commencer et finir
+            tour (np.ndarray): Tableau d'indices représentant le tour (doit commencer et finir
                         par la même ville)
 
         Returns:
@@ -215,6 +207,10 @@ class ACOEngine:
         # Mesurer le temps de chaque étape
         time_start_construction = time.perf_counter()
 
+        # Précalculer tau^alpha et eta^beta une seule fois pour toutes les fourmis
+        tau_alpha = self.tau ** self.alpha
+        eta_beta = self.eta ** self.beta
+
         # 1. Construction des tours par toutes les fourmis
         tours = []
         lengths = []
@@ -223,8 +219,8 @@ class ACOEngine:
             # Chaque fourmi part d'une ville différente (cyclique)
             start_city = k % self.n
 
-            # Construire le tour probabiliste
-            tour = self._build_probabilistic_tour(start_city)
+            # Construire le tour probabiliste avec les matrices précalculées
+            tour = self._build_probabilistic_tour(start_city, tau_alpha, eta_beta)
 
             # Calculer la longueur du tour
             length = self._tour_length(tour)
@@ -243,22 +239,28 @@ class ACOEngine:
         time_end_evaporation = time.perf_counter()
         time_evaporation = time_end_evaporation - time_start_evaporation
 
-        # 3. Dépôt de phéromones (Ant-Cycle)
+        # 3. Dépôt de phéromones (Ant-Cycle) - Optimisé avec vectorisation
         time_start_deposit = time.perf_counter()
 
+        # Convertir les tours en tableau NumPy pour vectorisation
+        tours_array = np.array(tours, dtype=np.int32)
+        lengths_array = np.array(lengths, dtype=np.float64)
+
+        # Calculer les deltas pour chaque fourmi
+        deltas = self.Q / lengths_array
+
+        # Déposer les phéromones pour toutes les fourmis
         for k in range(self.m):
-            tour = tours[k]
-            L_k = lengths[k]
+            tour = tours_array[k]
+            delta_tau = deltas[k]
 
-            # Dépôt sur chaque arête du tour
-            for i in range(len(tour) - 1):
-                city_from = tour[i]
-                city_to = tour[i + 1]
+            # Extraire les paires (ville_from, ville_to)
+            cities_from = tour[:-1]
+            cities_to = tour[1:]
 
-                # Dépôt bidirectionnel (graphe non orienté)
-                delta_tau = self.Q / L_k
-                self.tau[city_from, city_to] += delta_tau
-                self.tau[city_to, city_from] += delta_tau
+            # Dépôt bidirectionnel vectorisé
+            np.add.at(self.tau, (cities_from, cities_to), delta_tau)
+            np.add.at(self.tau, (cities_to, cities_from), delta_tau)
 
         time_end_deposit = time.perf_counter()
         time_deposit = time_end_deposit - time_start_deposit
@@ -293,3 +295,4 @@ class ACOEngine:
         """Représentation en chaîne de caractères de l'objet ACOEngine."""
         return (f"ACOEngine(n_cities={self.n}, n_ants={self.m}, "
                 f"alpha={self.alpha}, beta={self.beta}, p={self.p}, Q={self.Q})")
+
